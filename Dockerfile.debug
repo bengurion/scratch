@@ -1,0 +1,59 @@
+# Diagnostic Dockerfile to debug webpack-dev-middleware issue
+FROM node:20-alpine AS base
+
+# Install system dependencies
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    make \
+    g++ \
+    git \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    musl-dev \
+    giflib-dev \
+    pixman-dev \
+    pangomm-dev \
+    libjpeg-turbo-dev \
+    freetype-dev \
+    pkgconfig \
+    cairo \
+    jpeg \
+    pango \
+    giflib \
+    pixman \
+    libjpeg-turbo \
+    freetype
+
+RUN ln -sf python3 /usr/bin/python
+ENV PYTHON=/usr/bin/python3
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
+ENV WWW_VERSION=docker-build
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install ALL dependencies and show what's installed
+RUN npm ci --legacy-peer-deps && \
+    echo "=== CHECKING WEBPACK PACKAGES ===" && \
+    ls -la node_modules/ | grep webpack || echo "No webpack packages found" && \
+    echo "=== CHECKING IF WEBPACK-DEV-MIDDLEWARE EXISTS ===" && \
+    ls -la node_modules/webpack-dev-middleware/ || echo "webpack-dev-middleware NOT FOUND" && \
+    echo "=== PACKAGE.JSON DEPENDENCIES ===" && \
+    cat package.json | grep -A 50 '"devDependencies"' | grep webpack || echo "No webpack in devDependencies"
+
+# Copy source files
+COPY . .
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S scratch -u 1001 -G nodejs && \
+    chown -R scratch:nodejs /app
+
+USER scratch
+
+# Debug command to check dependencies before starting
+CMD ["sh", "-c", "echo '=== FINAL CHECK ===' && ls -la node_modules/ | grep webpack && echo '=== STARTING APP ===' && npm start"]

@@ -1,0 +1,73 @@
+# Alternative Dockerfile for environments where canvas compilation fails
+# This version tries to install canvas with pre-built binaries first
+
+# Multi-stage Dockerfile for Scratch WWW
+FROM node:20-alpine AS base
+
+# Install system dependencies
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    make \
+    g++ \
+    git \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    musl-dev \
+    giflib-dev \
+    pixman-dev \
+    pangomm-dev \
+    libjpeg-turbo-dev \
+    freetype-dev \
+    pkgconfig \
+    cairo \
+    jpeg \
+    pango \
+    giflib \
+    pixman \
+    libjpeg-turbo \
+    freetype
+
+# Create python symlink and set up environment
+RUN ln -sf python3 /usr/bin/python
+ENV PYTHON=/usr/bin/python3
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Stage 2: Dependencies
+FROM base AS dependencies
+RUN npm ci --include=dev --legacy-peer-deps
+
+# Stage 3: Build
+FROM dependencies AS build
+COPY . .
+RUN npm run build
+
+# Stage 4: Production
+FROM base AS production
+
+# Create user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S scratch -u 1001 -G nodejs
+
+# Install production dependencies
+COPY package*.json ./
+RUN npm ci --omit=dev --legacy-peer-deps && npm cache clean --force
+
+# Copy built files
+COPY --from=build /app/build ./build
+COPY --from=build /app/intl ./intl
+COPY --from=build /app/src ./src
+COPY --from=build /app/dev-server ./dev-server
+COPY --from=build /app/bin ./bin
+
+RUN chown -R scratch:nodejs /app
+USER scratch
+
+EXPOSE 8333
+CMD ["npm", "start"]

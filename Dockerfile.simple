@@ -1,0 +1,51 @@
+# Simple working Dockerfile for Scratch WWW
+FROM node:20-alpine
+
+# Install system dependencies for canvas and git for build process
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    git \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    musl-dev \
+    giflib-dev \
+    pixman-dev \
+    libjpeg-turbo-dev \
+    freetype-dev \
+    pkgconfig
+
+# Create python symlink
+RUN ln -sf python3 /usr/bin/python
+
+# Set environment variables
+ENV PYTHON=/usr/bin/python3
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
+ENV WWW_VERSION=docker-build
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --legacy-peer-deps
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Create user and set permissions
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S scratch -u 1001 -G nodejs && \
+    chown -R scratch:nodejs /app
+
+USER scratch
+
+EXPOSE 8333
+
+CMD ["npm", "start"]

@@ -1,0 +1,84 @@
+# Production-optimized Dockerfile for Scratch WWW
+# Excludes test files and other unnecessary content for smaller image size
+
+FROM node:20-alpine AS base
+
+# Install system dependencies for native modules
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    make \
+    g++ \
+    git \
+    cairo-dev \
+    jpeg-dev \
+    pango-dev \
+    musl-dev \
+    giflib-dev \
+    pixman-dev \
+    pangomm-dev \
+    libjpeg-turbo-dev \
+    freetype-dev \
+    pkgconfig \
+    cairo \
+    jpeg \
+    pango \
+    giflib \
+    pixman \
+    libjpeg-turbo \
+    freetype
+
+# Create python symlink and set environment
+RUN ln -sf python3 /usr/bin/python
+ENV PYTHON=/usr/bin/python3
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
+ENV WWW_VERSION=docker-build
+
+WORKDIR /app
+
+# Stage 1: Install dependencies and build
+FROM base AS builder
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (needed for webpack and dev-server)
+RUN npm ci --legacy-peer-deps
+
+# Copy source code (excluding test/ and other unnecessary files via .dockerignore)
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Stage 2: Production runtime
+FROM base AS production
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S scratch -u 1001 -G nodejs
+
+# Copy package files and install dependencies
+COPY package*.json ./
+RUN npm ci --legacy-peer-deps && npm cache clean --force
+
+# Copy only the necessary application files from builder
+# Note: test/ directory is already excluded by .dockerignore
+COPY --from=builder /app/build ./build
+COPY --from=builder /app/intl ./intl
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/dev-server ./dev-server
+COPY --from=builder /app/bin ./bin
+COPY --from=builder /app/webpack.config.js ./webpack.config.js
+
+# Set ownership and switch to non-root user
+RUN chown -R scratch:nodejs /app
+USER scratch
+
+EXPOSE 8333
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:8333', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
+
+CMD ["npm", "start"]

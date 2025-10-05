@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # Nginx reverse proxy with SSL termination for microphone access
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"     # HTTP (redirects to HTTPS)
+      - "443:443"   # HTTPS (enables microphone access via IP)
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - scratch-www
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Main Scratch WWW application (HTTP only, behind nginx)
+  scratch-www:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    expose:
+      - "8333"  # Only expose internally to nginx
+    environment:
+      - NODE_ENV=production
+      - PORT=8333
+    volumes:
+      # Persistent storage for .sb3 project files
+      - scratch-projects:/app/projects
+      # Mount source code for development (comment out for production)
+      - ./src:/app/src:ro
+      - ./dev-server:/app/dev-server:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8333', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Development version with hot reload
+  scratch-www-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    expose:
+      - "8333"
+    environment:
+      - NODE_ENV=development
+      - PORT=8333
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - scratch-projects:/app/projects
+    command: npm start
+    restart: unless-stopped
+    profiles:
+      - dev
+
+  # Nginx for development
+  nginx-dev:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - scratch-www-dev
+    restart: unless-stopped
+    profiles:
+      - dev
+
+  # Direct access version (no nginx, for testing)
+  scratch-www-direct:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8333:8333"  # Direct access (microphone only works via localhost)
+    environment:
+      - NODE_ENV=production
+      - PORT=8333
+    volumes:
+      - scratch-projects:/app/projects
+      - ./src:/app/src:ro
+      - ./dev-server:/app/dev-server:ro
+    restart: unless-stopped
+    profiles:
+      - direct
+
+volumes:
+  scratch-projects:
+    driver: local
